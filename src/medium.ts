@@ -18,6 +18,8 @@ const {
     // INPUT_MARKDOWN_FILE,
     // INPUT_BASE_URL,
     // INPUT_POST_URL,
+    MEDIUM_USER_ID,
+    MEDIUM_USER_NAME,
     MEDIUM_ACCESS_TOKEN,
     MEDIUM_POST_STATUS = PostPublishStatus.DRAFT,
     MEDIUM_POST_LICENSE = PostLicense.ALL_RIGHTS_RESERVED,
@@ -40,6 +42,8 @@ class MediumError extends Error {
  */
 class MediumClient {
     private readonly _accessToken: string;
+    private _userId: string | null;
+    private _userName: string | null;
 
     /**
      * Sets an access token on the client used for making requests.
@@ -48,6 +52,8 @@ class MediumClient {
         accessToken: string | undefined = MEDIUM_ACCESS_TOKEN
     ) {
         this._accessToken = accessToken!;
+        this._userId = MEDIUM_USER_ID || null;
+        this._userName = MEDIUM_USER_NAME || null;
     }
 
     /**
@@ -57,10 +63,13 @@ class MediumClient {
      * Requires the current access token to have the basicProfile scope.
      */
     async getUser(): Promise<User> {
-        return this._makeRequest({
+        const user: User = await this._makeRequest({
             method: 'GET',
             path: '/v1/me',
         });
+        this._userId = user.id;
+        this._userName = user.name;
+        return user;
     }
 
     /**
@@ -412,6 +421,86 @@ class MediumClient {
             posts,
             next,
         };
+    }
+
+    /**
+     * Gets an existing post by title.
+     * @param {string} title - The title of the post to find.
+     * @returns {Promise<Post | null>} The post if found, otherwise null. I prefer null to undefined but dealers choice
+     * @throws {NoUserNameError} no user name provided
+     */
+    async getByTitle(title: string): Promise<PublishedPost | null> {
+        if(!this._userName){
+            throw new Error('No user name provided');
+        }
+        const posts = await this.getPosts(this._userName);
+        const post = posts.find((p) => p.title === title);
+        return post || null;
+    }
+
+    /**
+     * "Updates" a post by creating a new version with updated content.
+     * Since Medium API doesn't support deletion, this method creates a new post with the same title
+     * and sets the canonicalUrl to the original post's URL, indicating that it supersedes the original.
+     * @param {string} postId - The ID of the post to update.
+     * @param {CreatePostRequest} updateData - The updated post data.
+     * @returns {Promise<Post>} The updated post.
+     */
+    async updateById(postId: string, updateData: CreatePostRequest): Promise<Post> {
+        const originalPost = await this._getPostById(postId); // Fetch the original post details if available
+        if (originalPost) {
+            updateData.canonicalUrl = originalPost.link; // Use original post's URL for SEO
+            updateData.title = `${updateData.title}`; // Optionally distinguish versions
+        }
+        return this.createPost(updateData);
+    }
+
+    /**
+     * Finds a post by title and updates it if found, otherwise does nothing.
+     * Since Medium API doesn't support deletion, this method creates a new post with the same title
+     * and sets the canonicalUrl to the original post's URL if it exists.
+     * @param {string} title - The title of the post to update.
+     * @param {CreatePostRequest} updateData - The updated post data.
+     * @returns {Promise<Post | null>} The updated post if found, otherwise null.
+     */
+    async updateByTitle(title: string, updateData: CreatePostRequest): Promise<Post | null> {
+        const post = await this.getByTitle(title);
+        if (post) {
+            return this.updateById(post.id, updateData);
+        }
+        return null;
+    }
+
+    /**
+     * Creates or updates a post by title.
+     * If a post with the specified title exists, it creates a new version with updated content.
+     * If not, it creates a new post without any canonicalUrl.
+     * @param {string} title - The title of the post.
+     * @param {CreatePostRequest} updateData - The post data for creation or update.
+     * @returns {Promise<Post>} The created or updated post data.
+     */
+    async createOrUpdateByTitle(title: string, updateData: CreatePostRequest): Promise<Post> {
+        const existingPost = await this.getByTitle(title);
+        if (existingPost) {
+            return this.updateById(existingPost.id, updateData);
+        } else {
+            return this.createPost(updateData);
+        }
+    }
+
+    /**
+     * Fetches post details by ID.
+     * Since Medium API doesn’t support direct fetching by ID, this uses existing methods as a workaround.
+     * @param {string} postId - The ID of the post to fetch.
+     * @returns {Promise<PublishedPost | null>} The post details if found, otherwise null.
+     */
+    private async _getPostById(postId: string): Promise<PublishedPost | null> {
+        if(!this._userName){
+            throw new Error('No user name provided');
+        }
+        const posts = await this.getPosts(this._userName); 
+        const post = posts.find((p) => p.id === postId);
+        return post || null;
     }
 }
 

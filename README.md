@@ -42,7 +42,15 @@ import {
 
 // Access Token is optional, can also be set
 // as environment variable `MEDIUM_ACCESS_TOKEN`
-const medium = new MediumClient('YOUR_ACCESS_TOKEN');
+
+/**
+ * @note be sure to include a MEDIUM_ACCESS_TOKEN in your .env file and/or github secrets
+ */
+const {
+  MEDIUM_ACCESS_TOKEN
+} = process.env;
+
+const medium = new MediumClient(MEDIUM_ACCESS_TOKEN);
 
 async function main() {
   const user = await medium.getUser();
